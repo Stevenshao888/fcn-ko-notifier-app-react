@@ -3,8 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { 
     getAuth, 
     signInAnonymously, 
-    onAuthStateChanged,
-    signInWithCustomToken
+    onAuthStateChanged
 } from 'firebase/auth';
 import { 
     getFirestore, 
@@ -35,9 +34,10 @@ const FiCalendar = (props) => <svg stroke="currentColor" fill="none" strokeWidth
 const FiClock = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>;
 const FiUser = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>;
 
-// --- Firebase 設定 ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {}; 
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+// --- Firebase 設定 (修正版) ---
+const firebaseConfig = process.env.REACT_APP_FIREBASE_CONFIG 
+    ? JSON.parse(process.env.REACT_APP_FIREBASE_CONFIG) 
+    : {};
 
 // 主應用程式組件
 export default function App() {
@@ -80,6 +80,13 @@ export default function App() {
     }, [fcnProducts, addNotification, prevProducts]);
 
     useEffect(() => {
+        if (Object.keys(firebaseConfig).length === 0) {
+            if (process.env.NODE_ENV === 'production') {
+                setError("Firebase 設定未載入。請確認 Vercel 環境變數已正確設定。");
+            }
+            setIsLoading(false);
+            return;
+        }
         try {
             const app = initializeApp(firebaseConfig);
             const authInstance = getAuth(app);
@@ -93,11 +100,7 @@ export default function App() {
                     setIsLoading(false);
                 } else {
                     try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await signInWithCustomToken(authInstance, __initial_auth_token);
-                        } else {
-                            await signInAnonymously(authInstance);
-                        }
+                        await signInAnonymously(authInstance);
                     } catch (authError) { console.error("登入失敗:", authError); setError("無法連接到認證服務。"); setIsLoading(false); }
                 }
             });
@@ -107,7 +110,7 @@ export default function App() {
     useEffect(() => {
         if (user && db) {
             const userId = user.uid;
-            const collectionPath = `artifacts/${appId}/users/${userId}/fcn_products`;
+            const collectionPath = `users/${userId}/fcn_products`;
             const q = query(collection(db, collectionPath));
 
             const unsubscribe = onSnapshot(q, (querySnapshot) => {
@@ -128,7 +131,7 @@ export default function App() {
         const initialStocks = product.stocks.map(stock => ({ ...stock, lastClosePrice: parseFloat((Math.random() * (stock.koPrice * 0.8) + (stock.koPrice * 0.1)).toFixed(2)), hasKnockedOut: false }));
         try {
             const userId = user.uid;
-            const collectionPath = `artifacts/${appId}/users/${userId}/fcn_products`;
+            const collectionPath = `users/${userId}/fcn_products`;
             await addDoc(collection(db, collectionPath), { ...product, stocks: initialStocks, createdAt: new Date(), comparisonNotificationSent: false, maturityNotificationSent: false });
             closeForm();
         } catch (e) { console.error("新增 FCN 失敗:", e); setError("無法新增 FCN 產品。"); }
@@ -138,7 +141,7 @@ export default function App() {
         if (!db || !user || !editingProduct) return;
         try {
             const userId = user.uid;
-            const docPath = `artifacts/${appId}/users/${userId}/fcn_products/${editingProduct.id}`;
+            const docPath = `users/${userId}/fcn_products/${editingProduct.id}`;
             const updatedStocks = product.stocks.map(newStock => {
                 const oldStock = editingProduct.stocks.find(s => s.ticker === newStock.ticker);
                 return { ...newStock, hasKnockedOut: oldStock ? oldStock.hasKnockedOut : false, lastClosePrice: oldStock ? oldStock.lastClosePrice : 0 };
@@ -157,7 +160,7 @@ export default function App() {
         if (!db || !user) return;
         try {
             const userId = user.uid;
-            const docPath = `artifacts/${appId}/users/${userId}/fcn_products/${id}`;
+            const docPath = `users/${userId}/fcn_products/${id}`;
             await deleteDoc(doc(db, docPath));
             addNotification({ title: '操作成功', message: '已成功刪除 FCN 產品。' });
         } catch (e) { console.error("刪除 FCN 失敗:", e); setError("無法刪除 FCN 產品。"); }
@@ -196,7 +199,7 @@ export default function App() {
             }
             
             if (Object.keys(productUpdates).length > 0) {
-                const docPath = `artifacts/${appId}/users/${user.uid}/fcn_products/${product.id}`;
+                const docPath = `users/${user.uid}/fcn_products/${product.id}`;
                 updatePromises.push(updateDoc(doc(db, docPath), productUpdates));
             }
         }
@@ -220,7 +223,7 @@ export default function App() {
                 addNotification({ title: '模擬觸價成功', message: `產品 ${productToUpdateForKO.name} 中的 ${stock.ticker} 已觸價！`, type: 'success' });
                 koSimulated = true;
                 
-                const docPath = `artifacts/${appId}/users/${user.uid}/fcn_products/${productToUpdateForKO.id}`;
+                const docPath = `users/${user.uid}/fcn_products/${productToUpdateForKO.id}`;
                 updatePromises.push(updateDoc(doc(db, docPath), { stocks: updatedStocks }));
             }
         } 
@@ -326,7 +329,64 @@ const FCNForm = ({ mode, initialData, onSubmit, onCancel }) => {
         onSubmit({ name: name.trim(), customerName: customerName.trim(), orderDate, comparisonDate, expiryDate, stocks: validStocks.map(s => ({...s, ticker: s.ticker.toUpperCase().trim(), koPrice: parseFloat(s.koPrice)})) });
     };
 
-    return <div className="bg-gray-800 p-6 rounded-lg shadow-xl mb-6 animate-fade-in"><h2 className="text-2xl font-bold mb-4">{mode === 'edit' ? '編輯 FCN 產品' : '新增 FCN 產品'}</h2><form onSubmit={handleSubmit}><div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6"><div className="col-span-1"><label htmlFor="fcnName" className="block text-gray-400 mb-2">FCN 產品名稱</label><input id="fcnName" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：我的2025第一季FCN" className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div><div className="col-span-1"><label htmlFor="customerName" className="block text-gray-400 mb-2">客戶姓名</label><input id="customerName" type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="例如：王大明" className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div></div><div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"><div className="col-span-1"><label htmlFor="orderDate" className="block text-gray-400 mb-2">下單日期</label><input id="orderDate" type="date" value={orderDate} onChange={e=>setOrderDate(e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div><div className="col-span-1"><label htmlFor="comparisonDate" className="block text-gray-400 mb-2">比價日期</label><input id="comparisonDate" type="date" value={comparisonDate} onChange={e=>setComparisonDate(e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div><div className="col-span-1"><label htmlFor="expiryDate" className="block text-gray-400 mb-2">到期日</label><input id="expiryDate" type="date" value={expiryDate} onChange={e=>setExpiryDate(e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div></div><h3 className="text-lg font-semibold mb-3">連結標的 (最多4檔)</h3><div className="space-y-4">{stocks.map((stock, index) => (<div key={index} className="p-4 bg-gray-700/50 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-4"><div><label className="block text-gray-400 text-sm mb-1">股票代號 {index + 1}</label><input type="text" value={stock.ticker} onChange={(e) => handleStockChange(index, 'ticker', e.target.value)} placeholder="AAPL" className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div><div><label className="block text-gray-400 text-sm mb-1">KO 價格</label><input type="number" value={stock.koPrice} onChange={(e) => handleStockChange(index, 'koPrice', e.target.value)} placeholder="150.5" className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div><div><label className="block text-gray-400 text-sm mb-1">市場</label><select value={stock.market} onChange={(e) => handleStockChange(index, 'market', e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"><option value="US">美股</option><option value="JP">日股</option></select></div></div>))}</div>{formError && <p className="text-red-400 mt-4">{formError}</p>}<div className="flex justify-end space-x-4 mt-6"><button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">取消</button><button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">{mode === 'edit' ? '確認儲存' : '確認新增'}</button></div></form></div>;
+    return (
+        <div className="bg-gray-800 p-6 rounded-lg shadow-xl mb-6 animate-fade-in">
+            <h2 className="text-2xl font-bold mb-4">{mode === 'edit' ? '編輯 FCN 產品' : '新增 FCN 產品'}</h2>
+            <form onSubmit={handleSubmit}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div className="col-span-1">
+                        <label htmlFor="fcnName" className="block text-gray-400 mb-2">FCN 產品名稱</label>
+                        <input id="fcnName" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：我的2025第一季FCN" className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                    </div>
+                    <div className="col-span-1">
+                        <label htmlFor="customerName" className="block text-gray-400 mb-2">客戶姓名</label>
+                        <input id="customerName" type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="例如：王大明" className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div className="col-span-1">
+                        <label htmlFor="orderDate" className="block text-gray-400 mb-2">下單日期</label>
+                        <input id="orderDate" type="date" value={orderDate} onChange={e=>setOrderDate(e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                    </div>
+                    <div className="col-span-1">
+                        <label htmlFor="comparisonDate" className="block text-gray-400 mb-2">比價日期</label>
+                        <input id="comparisonDate" type="date" value={comparisonDate} onChange={e=>setComparisonDate(e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                    </div>
+                    <div className="col-span-1">
+                        <label htmlFor="expiryDate" className="block text-gray-400 mb-2">到期日</label>
+                        <input id="expiryDate" type="date" value={expiryDate} onChange={e=>setExpiryDate(e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                    </div>
+                </div>
+                <h3 className="text-lg font-semibold mb-3">連結標的 (最多4檔)</h3>
+                <div className="space-y-4">
+                    {stocks.map((stock, index) => (
+                        <div key={index} className="p-4 bg-gray-700/50 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">股票代號 {index + 1}</label>
+                                <input type="text" value={stock.ticker} onChange={(e) => handleStockChange(index, 'ticker', e.target.value)} placeholder="AAPL" className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">KO 價格</label>
+                                <input type="number" value={stock.koPrice} onChange={(e) => handleStockChange(index, 'koPrice', e.target.value)} placeholder="150.5" className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">市場</label>
+                                <select value={stock.market} onChange={(e) => handleStockChange(index, 'market', e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                    <option value="US">美股</option>
+                                    <option value="JP">日股</option>
+                                </select>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                {formError && <p className="text-red-400 mt-4">{formError}</p>}
+                <div className="flex justify-end space-x-4 mt-6">
+                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">取消</button>
+                    <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">{mode === 'edit' ? '確認儲存' : '確認新增'}</button>
+                </div>
+            </form>
+        </div>
+    );
 };
 
 const Dashboard = ({ products, onEdit, onDelete }) => {
@@ -349,7 +409,35 @@ const FCNProductCard = ({ product, onEdit, onDelete }) => {
     const isMatured = expiryDate && expiryDate <= today && !allKnockedOut;
 
 
-    return <div className={`bg-gray-800 rounded-xl shadow-lg overflow-hidden transition-all duration-300 animate-fade-in ${allKnockedOut ? 'ring-2 ring-green-500 shadow-green-500/20' : ''} ${isMatured ? 'ring-2 ring-red-500 shadow-red-500/20' : ''}`}><div className="p-5 bg-gray-800/40"><div className="flex justify-between items-start gap-4"><div className="flex-1"><h3 className="text-xl font-bold">{product.name}</h3>{product.customerName && <p className="text-sm text-indigo-300 flex items-center mt-1"><FiUser className="mr-2"/>{product.customerName}</p>}</div><div className="flex items-center space-x-2 flex-shrink-0"><button onClick={onEdit} className="flex items-center text-sm bg-gray-700 hover:bg-gray-600 text-white font-semibold py-1 px-3 rounded-lg shadow-md transition-colors"><FiEdit className="mr-2 h-4 w-4"/>重新編輯</button><button onClick={onDelete} className="flex items-center text-sm bg-red-800 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded-lg shadow-md transition-colors"><FiTrash2 className="mr-2 h-4 w-4"/>刪除組合</button></div></div><div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-400">{product.orderDate && <div className="flex items-center"><FiCalendar className="mr-2"/>下單: {product.orderDate}</div>}{product.comparisonDate && <div className="flex items-center"><FiCalendar className="mr-2"/>比價: {product.comparisonDate}</div>}{product.expiryDate && <div className="flex items-center"><FiCalendar className="mr-2"/>到期: {product.expiryDate}</div>}</div><div className="mt-3 space-y-2">{isBeforeComparisonDate && <div className="flex items-center justify-center text-center p-2 bg-yellow-500/20 text-yellow-300 rounded-lg font-semibold text-sm"><FiClock className="mr-2"/>等待比價日</div>}{isMatured && <div className="flex items-center justify-center text-center p-2 bg-red-500/20 text-red-300 rounded-lg font-semibold text-sm"><FiAlertTriangle className="mr-2"/>已到期未出場</div>}{allKnockedOut && <div className="flex items-center justify-center text-center p-2 bg-green-500/20 text-green-300 rounded-lg font-bold text-lg animate-pulse"><FiCheckCircle className="mr-3 text-2xl"/>所有標的皆已觸價，可以出場！</div>}</div></div><div className="p-5 space-y-4">{product.stocks.map((stock, index) => <UnderlyingStockRow key={index} stock={stock} isBeforeComparisonDate={isBeforeComparisonDate} />)}</div></div>;
+    return (
+        <div className={`bg-gray-800 rounded-xl shadow-lg overflow-hidden transition-all duration-300 animate-fade-in ${allKnockedOut ? 'ring-2 ring-green-500 shadow-green-500/20' : ''} ${isMatured ? 'ring-2 ring-red-500 shadow-red-500/20' : ''}`}>
+            <div className="p-5 bg-gray-800/40">
+                <div className="flex justify-between items-start gap-4">
+                    <div className="flex-1">
+                        <h3 className="text-xl font-bold">{product.name}</h3>
+                        {product.customerName && <p className="text-sm text-indigo-300 flex items-center mt-1"><FiUser className="mr-2"/>{product.customerName}</p>}
+                    </div>
+                    <div className="flex items-center space-x-2 flex-shrink-0">
+                        <button onClick={onEdit} className="flex items-center text-sm bg-gray-700 hover:bg-gray-600 text-white font-semibold py-1 px-3 rounded-lg shadow-md transition-colors"><FiEdit className="mr-2 h-4 w-4"/>重新編輯</button>
+                        <button onClick={onDelete} className="flex items-center text-sm bg-red-800 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded-lg shadow-md transition-colors"><FiTrash2 className="mr-2 h-4 w-4"/>刪除組合</button>
+                    </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-400">
+                    {product.orderDate && <div className="flex items-center"><FiCalendar className="mr-2"/>下單: {product.orderDate}</div>}
+                    {product.comparisonDate && <div className="flex items-center"><FiCalendar className="mr-2"/>比價: {product.comparisonDate}</div>}
+                    {product.expiryDate && <div className="flex items-center"><FiCalendar className="mr-2"/>到期: {product.expiryDate}</div>}
+                </div>
+                <div className="mt-3 space-y-2">
+                    {isBeforeComparisonDate && <div className="flex items-center justify-center text-center p-2 bg-yellow-500/20 text-yellow-300 rounded-lg font-semibold text-sm"><FiClock className="mr-2"/>等待比價日</div>}
+                    {isMatured && <div className="flex items-center justify-center text-center p-2 bg-red-500/20 text-red-300 rounded-lg font-semibold text-sm"><FiAlertTriangle className="mr-2"/>已到期未出場</div>}
+                    {allKnockedOut && <div className="flex items-center justify-center text-center p-2 bg-green-500/20 text-green-300 rounded-lg font-bold text-lg animate-pulse"><FiCheckCircle className="mr-3 text-2xl"/>所有標的皆已觸價，可以出場！</div>}
+                </div>
+            </div>
+            <div className="p-5 space-y-4">
+                {product.stocks.map((stock, index) => <UnderlyingStockRow key={index} stock={stock} isBeforeComparisonDate={isBeforeComparisonDate} />)}
+            </div>
+        </div>
+    );
 };
 
 const UnderlyingStockRow = ({ stock, isBeforeComparisonDate }) => {
@@ -373,93 +461,3 @@ const NotificationToast = ({ title, message, type = 'info' }) => {
 const style = document.createElement('style');
 style.textContent = `@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&family=Roboto+Mono&display=swap'); body { font-family: 'Noto Sans TC', 'sans-serif'; } .font-sans { font-family: 'Noto Sans TC', 'sans-serif'; } .font-mono { font-family: 'Roboto Mono', 'monospace'; } @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } } .animate-fade-in { animation: fade-in 0.5s ease-out forwards; } .bg-gray-700 [type='date']::-webkit-calendar-picker-indicator { filter: invert(1); }`;
 document.head.appendChild(style);
-```
-
-# 上線第二步：除錯指南
-
-您好，非常抱歉這個部署問題一再出現。為了徹底解決這個問題，我們需要再進行一次更新，但這次請務必嚴格依照順序。
-
----
-
-### 第 1 步：(最重要的第一步) 更新 `package.json`
-
-我們要先告訴 Vercel 我們的專案需要哪些函式庫。
-
-1.  **前往您的 GitHub 倉庫** (`fcn-ko-notifier-app-react`)。
-2.  在檔案列表中，點擊 `package.json` 這個檔案。
-3.  點擊右上角的**鉛筆圖示 (Edit this file)**。
-4.  **刪除編輯器中所有的現有程式碼**。
-5.  **複製並貼上下方提供的完整程式碼**：
-
-    ```json
-    {
-      "name": "fcn-ko-notifier-app-react",
-      "version": "0.1.0",
-      "private": true,
-      "dependencies": {
-        "@testing-library/jest-dom": "^5.17.0",
-        "@testing-library/react": "^13.4.0",
-        "@testing-library/user-event": "^13.5.0",
-        "firebase": "^10.12.2",
-        "react": "^18.3.1",
-        "react-dom": "^18.3.1",
-        "react-scripts": "5.0.1",
-        "web-vitals": "^2.1.4"
-      },
-      "scripts": {
-        "start": "react-scripts start",
-        "build": "react-scripts build",
-        "test": "react-scripts test",
-        "eject": "react-scripts eject"
-      },
-      "eslintConfig": {
-        "extends": [
-          "react-app",
-          "react-app/jest"
-        ]
-      },
-      "browserslist": {
-        "production": [
-          ">0.2%",
-          "not dead",
-          "not op_mini all"
-        ],
-        "development": [
-          "last 1 chrome version",
-          "last 1 firefox version",
-          "last 1 safari version"
-        ]
-      }
-    }
-    ```
-6.  捲到頁面下方，點擊綠色的 **「Commit changes...」** 按鈕儲存。
-
----
-
-### 第 2 步：更新 `App.js`
-
-設定好函式庫後，我們再放入 FCN 應用程式的主程式碼。
-
-1.  **回到 GitHub 倉庫主頁**，點擊進入 `src` 資料夾。
-2.  點擊 `App.js` 這個檔案。
-3.  點擊右上角的**鉛筆圖示 (Edit this file)**。
-4.  **刪除編輯器中所有的現有程式碼**。
-5.  **複製左邊視窗中 `FCN 觸價通知應用程式 (React 版)` 的全部程式碼**，然後貼到這個 `App.js` 檔案的編輯器中。
-6.  捲到頁面下方，點擊綠色的 **「Commit changes...」** 按鈕儲存。
-
----
-
-### 第 3 步：觸發最終部署
-
-當您完成 `App.js` 的儲存後，Vercel 會自動開始最後一次的部署。這次因為 `package.json` 檔案已經是正確的，部署理應會成功。
-
-* 您可以回到 Vercel 的專案頁面，查看部署進度。
-* 等待部署完成（約 1-2 分鐘）。
-
----
-
-### 第 4 步：如果仍然失敗
-
-如果這次部署仍然失敗，請您在 Vercel 的專案頁面，點擊右上角的 **「Redeploy」** 按鈕，然後選擇 **「Redeploy without using build cache」** (不使用快取重新部署)。這會強制 Vercel 重新下載所有設定，通常能解決這類頑固的快取問題。
-
-**完成後，請將 Vercel 提供給您的暫時網址告訴我**，我們就可以進行最後的網域設
