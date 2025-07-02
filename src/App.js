@@ -63,7 +63,6 @@ export default function App() {
       return () => clearTimeout(timeoutId);
   }, []);
 
-  // 修正：移除 prevProducts 依賴，避免無限迴圈
   useEffect(() => {
       const newlyKnockedOutProducts = fcnProducts.filter(product => {
           const prev = prevProducts.find(p => p.id === product.id);
@@ -75,7 +74,11 @@ export default function App() {
 
       if (newlyKnockedOutProducts.length > 0) {
           newlyKnockedOutProducts.forEach(product => {
-              addNotification({ title: `產品可出場: ${product.name}`, message: '所有連結標的皆已觸價！', type: 'success' });
+              addNotification({ 
+                  title: `產品可出場: ${product.name}`, 
+                  message: '所有連結標的皆已觸價！', 
+                  type: 'success' 
+              });
           });
       }
       setPrevProducts(JSON.parse(JSON.stringify(fcnProducts)));
@@ -137,7 +140,10 @@ export default function App() {
       }
   }, [user, db]);
   
-  const closeForm = () => { setFormMode('hidden'); setEditingProduct(null); };
+  const closeForm = () => { 
+      setFormMode('hidden'); 
+      setEditingProduct(null); 
+  };
 
   const handleAddFCN = async (product) => {
       if (!db || !user) {
@@ -225,7 +231,11 @@ export default function App() {
           const userId = user.uid;
           const docPath = `users/${userId}/fcn_products/${id}`;
           await deleteDoc(doc(db, docPath));
-          addNotification({ title: '刪除成功', message: '已成功刪除 FCN 產品。', type: 'success' });
+          addNotification({ 
+              title: '刪除成功', 
+              message: '已成功刪除 FCN 產品。', 
+              type: 'success' 
+          });
       } catch (e) { 
           console.error("刪除 FCN 失敗:", e); 
           setError(`無法刪除 FCN 產品：${e.message}`);
@@ -255,7 +265,11 @@ export default function App() {
               const comparisonDate = new Date(product.comparisonDate);
               comparisonDate.setHours(0, 0, 0, 0);
               if (comparisonDate.getTime() === todayTime) {
-                  addNotification({ title: '比價開始', message: `產品 "${product.name}" 已到達比價日。`, type: 'info' });
+                  addNotification({ 
+                      title: '比價開始', 
+                      message: `產品 "${product.name}" 已到達比價日。`, 
+                      type: 'info' 
+                  });
                   productUpdates.comparisonNotificationSent = true;
               }
           }
@@ -264,7 +278,11 @@ export default function App() {
               const expiryDate = new Date(product.expiryDate);
               expiryDate.setHours(0, 0, 0, 0);
               if (expiryDate.getTime() === todayTime) {
-                  addNotification({ title: '產品到期提醒', message: `產品 "${product.name}" 已到期但未完全出場。`, type: 'error' });
+                  addNotification({ 
+                      title: '產品到期提醒', 
+                      message: `產品 "${product.name}" 已到期但未完全出場。`, 
+                      type: 'error' 
+                  });
                   productUpdates.maturityNotificationSent = true;
               }
           }
@@ -291,7 +309,11 @@ export default function App() {
               const stock = updatedStocks[stockIndexToKO];
               stock.lastClosePrice = parseFloat((stock.koPrice * 1.05).toFixed(2));
               stock.hasKnockedOut = true;
-              addNotification({ title: '模擬觸價成功', message: `產品 ${productToUpdateForKO.name} 中的 ${stock.ticker} 已觸價！`, type: 'success' });
+              addNotification({ 
+                  title: '模擬觸價成功', 
+                  message: `產品 ${productToUpdateForKO.name} 中的 ${stock.ticker} 已觸價！`, 
+                  type: 'success' 
+              });
               koSimulated = true;
               
               const docPath = `users/${user.uid}/fcn_products/${productToUpdateForKO.id}`;
@@ -300,7 +322,11 @@ export default function App() {
       } 
       
       if (updatePromises.length === 0 && !koSimulated) {
-           addNotification({ title: '提示', message: '今日無任何事件發生。', type: 'info' });
+           addNotification({ 
+              title: '提示', 
+              message: '今日無任何事件發生。', 
+              type: 'info' 
+          });
       }
 
       if (updatePromises.length > 0) {
@@ -313,7 +339,10 @@ export default function App() {
       }
   };
   
-  const handleEditClick = (product) => { setEditingProduct(product); setFormMode('edit'); };
+  const handleEditClick = (product) => { 
+      setEditingProduct(product); 
+      setFormMode('edit'); 
+  };
 
   if (isLoading) return <LoadingScreen />;
   if (error) return <ErrorScreen message={error} />;
@@ -322,12 +351,167 @@ export default function App() {
       <div className="bg-gray-900 text-white min-h-screen font-sans">
           <NotificationArea notifications={notifications} />
           <div className="container mx-auto p-4 md:p-8">
-              <Header onRefresh={handleRefreshPrices} onInfo={() => setShowInfoModal(true)} onNotify={() => setShowNotificationModal(true)} />
-              {showInfoModal && <InfoModal onClose={() => setShowInfoModal(false)} userId={user?.uid} />}
-              {showNotificationModal && <NotificationSettingsModal onClose={() => setShowNotificationModal(false)} addNotification={addNotification} />}
+              <Header 
+                  onRefresh={handleRefreshPrices} 
+                  onInfo={() => setShowInfoModal(true)} 
+                  onNotify={() => setShowNotificationModal(true)} 
+              />
+              {showInfoModal && (
+                  <InfoModal 
+                      onClose={() => setShowInfoModal(false)} 
+                      userId={user?.uid} 
+                  />
+              )}
+              {showNotificationModal && (
+                  <NotificationSettingsModal 
+                      onClose={() => setShowNotificationModal(false)} 
+                      addNotification={addNotification} 
+                  />
+              )}
               <main>
                   {formMode !== 'hidden' ? (
-                      <FCNForm mode={formMode} initialData={editingProduct} onSubmit={formMode === 'add' ? handleAddFCN : handleUpdateFCN} onCancel={closeForm} />
+                      <FCNForm 
+                          mode={formMode} 
+                          initialData={editingProduct} 
+                          onSubmit={formMode === 'add' ? handleAddFCN : handleUpdateFCN} 
+                          onCancel={closeForm} 
+                      />
                   ) : (
                       <div className="flex justify-end mb-4">
-                          <button onClick={() => setFormMode('add')} className="flex items-center bg-indigo-600 hover:bg-indigo-
+                          <button 
+                              onClick={() => setFormMode('add')} 
+                              className="flex items-center bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105"
+                          >
+                              <FiPlus className="mr-2" /> 新增 FCN 產品
+                          </button>
+                      </div>
+                  )}
+                  <Dashboard 
+                      products={fcnProducts} 
+                      onEdit={handleEditClick} 
+                      onDelete={handleDeleteFCN} 
+                  />
+              </main>
+          </div>
+      </div>
+  );
+}
+
+// --- 子組件 ---
+
+const LoadingScreen = () => (
+  <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
+      <div className="text-center">
+          <CgSpinner className="animate-spin text-5xl text-indigo-400 mx-auto" />
+          <p className="mt-4 text-lg">正在載入應用程式...</p>
+      </div>
+  </div>
+);
+
+const ErrorScreen = ({ message }) => (
+  <div className="flex items-center justify-center min-h-screen bg-gray-900 text-red-400">
+      <div className="text-center p-8 bg-gray-800 rounded-lg shadow-2xl">
+          <FiAlertTriangle className="text-5xl text-red-500 mx-auto" />
+          <h2 className="mt-4 text-2xl font-bold">發生錯誤</h2>
+          <p className="mt-2">{message}</p>
+      </div>
+  </div>
+);
+
+const Header = ({ onRefresh, onInfo, onNotify }) => (
+  <header className="flex justify-between items-center mb-6 pb-4 border-b border-gray-700">
+      <div>
+          <h1 className="text-3xl md:text-4xl font-bold text-white">FCN 觸價通知</h1>
+          <p className="text-gray-400">以產品組合為單位，追蹤記憶式出場條件</p>
+      </div>
+      <div className="flex items-center space-x-2">
+          <button 
+              onClick={onNotify} 
+              className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition-colors relative" 
+              title="通知設定"
+          >
+              <FiBell className="text-xl" />
+          </button>
+          <button 
+              onClick={onInfo} 
+              className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition-colors" 
+              title="應用程式資訊"
+          >
+              <FiInfo className="text-xl" />
+          </button>
+          <button 
+              onClick={onRefresh} 
+              className="flex items-center bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-colors" 
+              title="模擬每日檢查"
+          >
+              <FiRefreshCw className="mr-2" />
+              <span className="hidden md:inline">模擬每日檢查</span>
+          </button>
+      </div>
+  </header>
+);
+
+const InfoModal = ({ onClose, userId }) => (
+  <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg shadow-2xl max-w-lg w-full p-6 relative animate-fade-in">
+          <button 
+              onClick={onClose} 
+              className="absolute top-4 right-4 text-gray-400 hover:text-white"
+          >
+              <FiX size={24} />
+          </button>
+          <h2 className="text-2xl font-bold mb-4 text-indigo-400">應用程式資訊</h2>
+          <div className="space-y-3 text-gray-300">
+              <p><strong>新功能:</strong></p>
+              <ul className="list-disc list-inside space-y-2 pl-2">
+                  <li>連結標的已擴充至四檔。</li>
+                  <li>新增客戶姓名欄位。</li>
+                  <li>資訊視窗已加入明確的「關閉」按鈕。</li>
+              </ul>
+              <p className="pt-2">您的專屬使用者 ID 為:</p>
+              <p className="font-mono bg-gray-900 p-2 rounded text-indigo-300 text-xs break-all">
+                  {userId}
+              </p>
+          </div>
+          <div className="mt-6 text-right">
+              <button 
+                  onClick={onClose} 
+                  className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg"
+              >
+                  關閉
+              </button>
+          </div>
+      </div>
+  </div>
+);
+
+const NotificationSettingsModal = ({ onClose, addNotification }) => {
+  const [permission, setPermission] = useState('default');
+  const [email, setEmail] = useState('');
+  
+  const handleRequestPermission = () => {
+      setPermission('granting');
+      addNotification({ 
+          title: '模擬授權', 
+          message: '瀏覽器正在向您請求傳送通知的權限...' 
+      });
+      setTimeout(() => { 
+          setPermission('granted'); 
+          addNotification({ 
+              title: '授權成功', 
+              message: '您已允許瀏覽器推播通知！', 
+              type: 'success' 
+          }); 
+      }, 1500);
+  };
+  
+  const handleSaveEmail = () => {
+      if(email && email.includes('@')) { 
+          addNotification({ 
+              title: '設定成功', 
+              message: `電子郵件通知將發送到 ${email}`, 
+              type: 'success' 
+          }); 
+          onClose(); 
+      } else { 
+          addNotification({
