@@ -164,7 +164,7 @@ export default function App() {
     };
 
     const handleRefreshPrices = async () => {
-        if (!db || !user || fcnProducts.length === 0) return;
+        if (!db || !user) return;
         
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -173,11 +173,10 @@ export default function App() {
         const updatePromises = [];
         let koSimulated = false;
 
-        // 1. Check for date-based notifications for all products
-        fcnProducts.forEach(product => {
+        for (const product of fcnProducts) {
             const productUpdates = {};
-
-            // Check for Comparison Date Start
+            const isAllKO = product.stocks.every(s => s.hasKnockedOut);
+            
             if (product.comparisonDate && !product.comparisonNotificationSent) {
                 const comparisonDate = new Date(product.comparisonDate);
                 comparisonDate.setHours(0, 0, 0, 0);
@@ -187,13 +186,10 @@ export default function App() {
                 }
             }
 
-            // Check for Maturity Date
-            if (product.expiryDate && !product.maturityNotificationSent) {
+            if (product.expiryDate && !product.maturityNotificationSent && !isAllKO) {
                 const expiryDate = new Date(product.expiryDate);
                 expiryDate.setHours(0, 0, 0, 0);
-                const isAllKO = product.stocks.every(s => s.hasKnockedOut);
-
-                if (expiryDate.getTime() === todayTime && !isAllKO) {
+                if (expiryDate.getTime() === todayTime) {
                     addNotification({ title: '產品到期提醒', message: `產品 "${product.name}" 已到期但未完全出場。`, type: 'error' });
                     productUpdates.maturityNotificationSent = true;
                 }
@@ -203,9 +199,8 @@ export default function App() {
                 const docPath = `artifacts/${appId}/users/${user.uid}/fcn_products/${product.id}`;
                 updatePromises.push(updateDoc(doc(db, docPath), productUpdates));
             }
-        });
+        }
 
-        // 2. Perform KO Simulation
         const productToUpdateForKO = fcnProducts.find(p => {
             if (!p.comparisonDate) return false;
             const comparisonDate = new Date(p.comparisonDate);
@@ -231,10 +226,9 @@ export default function App() {
         } 
         
         if (updatePromises.length === 0 && !koSimulated) {
-             addNotification({ title: '提示', message: '沒有可模擬的事件。', type: 'info' });
+             addNotification({ title: '提示', message: '今日無任何事件發生。', type: 'info' });
         }
 
-        // 3. Execute all updates
         if (updatePromises.length > 0) {
             try {
                 await Promise.all(updatePromises);
@@ -283,7 +277,7 @@ const Header = ({ onRefresh, onInfo, onNotify }) => (
     </header>
 );
 
-const InfoModal = ({ onClose, userId }) => <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"><div className="bg-gray-800 rounded-lg shadow-2xl max-w-lg w-full p-6 relative animate-fade-in"><button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white"><FiX size={24} /></button><h2 className="text-2xl font-bold mb-4 text-indigo-400">應用程式資訊</h2><div className="space-y-3 text-gray-300"><p><strong>新功能:</strong></p><ul className="list-disc list-inside space-y-2 pl-2"><li>連結標的已增加為四檔。</li><li>已新增客戶姓名欄位。</li><li>點擊 <span className="font-mono bg-gray-700 px-1 rounded">模擬每日檢查</span> 會觸發當日所有事件。</li></ul><p className="pt-2">您的專屬使用者 ID 為:</p><p className="font-mono bg-gray-900 p-2 rounded text-indigo-300 text-xs break-all">{userId}</p></div></div></div>;
+const InfoModal = ({ onClose, userId }) => <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"><div className="bg-gray-800 rounded-lg shadow-2xl max-w-lg w-full p-6 relative animate-fade-in"><button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white"><FiX size={24} /></button><h2 className="text-2xl font-bold mb-4 text-indigo-400">應用程式資訊</h2><div className="space-y-3 text-gray-300"><p><strong>新功能:</strong></p><ul className="list-disc list-inside space-y-2 pl-2"><li>連結標的已擴充至四檔。</li><li>新增客戶姓名欄位。</li><li>資訊視窗已加入明確的「關閉」按鈕。</li></ul><p className="pt-2">您的專屬使用者 ID 為:</p><p className="font-mono bg-gray-900 p-2 rounded text-indigo-300 text-xs break-all">{userId}</p></div><div className="mt-6 text-right"><button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">關閉</button></div></div></div>;
 
 const NotificationSettingsModal = ({ onClose, addNotification }) => {
     const [permission, setPermission] = useState('default');
@@ -322,7 +316,7 @@ const FCNForm = ({ mode, initialData, onSubmit, onCancel }) => {
         }
     }, [mode, initialData]);
 
-    const handleStockChange = (index, field, value) => { const newStocks = [...stocks]; newStocks[index][field] = value; setStocks(newStocks); };
+    const handleStockChange = (index, field, value) => { const newStocks = [...stocks]; newStocks[index] = {...newStocks[index], [field]: value}; setStocks(newStocks); };
     const handleSubmit = (e) => {
         e.preventDefault();
         if (!name.trim()) { setFormError('FCN 產品名稱為必填項目。'); return; }
@@ -379,3 +373,93 @@ const NotificationToast = ({ title, message, type = 'info' }) => {
 const style = document.createElement('style');
 style.textContent = `@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&family=Roboto+Mono&display=swap'); body { font-family: 'Noto Sans TC', 'sans-serif'; } .font-sans { font-family: 'Noto Sans TC', 'sans-serif'; } .font-mono { font-family: 'Roboto Mono', 'monospace'; } @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } } .animate-fade-in { animation: fade-in 0.5s ease-out forwards; } .bg-gray-700 [type='date']::-webkit-calendar-picker-indicator { filter: invert(1); }`;
 document.head.appendChild(style);
+```
+
+# 上線第二步：除錯指南
+
+您好，非常抱歉這個部署問題一再出現。為了徹底解決這個問題，我們需要再進行一次更新，但這次請務必嚴格依照順序。
+
+---
+
+### 第 1 步：(最重要的第一步) 更新 `package.json`
+
+我們要先告訴 Vercel 我們的專案需要哪些函式庫。
+
+1.  **前往您的 GitHub 倉庫** (`fcn-ko-notifier-app-react`)。
+2.  在檔案列表中，點擊 `package.json` 這個檔案。
+3.  點擊右上角的**鉛筆圖示 (Edit this file)**。
+4.  **刪除編輯器中所有的現有程式碼**。
+5.  **複製並貼上下方提供的完整程式碼**：
+
+    ```json
+    {
+      "name": "fcn-ko-notifier-app-react",
+      "version": "0.1.0",
+      "private": true,
+      "dependencies": {
+        "@testing-library/jest-dom": "^5.17.0",
+        "@testing-library/react": "^13.4.0",
+        "@testing-library/user-event": "^13.5.0",
+        "firebase": "^10.12.2",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "react-scripts": "5.0.1",
+        "web-vitals": "^2.1.4"
+      },
+      "scripts": {
+        "start": "react-scripts start",
+        "build": "react-scripts build",
+        "test": "react-scripts test",
+        "eject": "react-scripts eject"
+      },
+      "eslintConfig": {
+        "extends": [
+          "react-app",
+          "react-app/jest"
+        ]
+      },
+      "browserslist": {
+        "production": [
+          ">0.2%",
+          "not dead",
+          "not op_mini all"
+        ],
+        "development": [
+          "last 1 chrome version",
+          "last 1 firefox version",
+          "last 1 safari version"
+        ]
+      }
+    }
+    ```
+6.  捲到頁面下方，點擊綠色的 **「Commit changes...」** 按鈕儲存。
+
+---
+
+### 第 2 步：更新 `App.js`
+
+設定好函式庫後，我們再放入 FCN 應用程式的主程式碼。
+
+1.  **回到 GitHub 倉庫主頁**，點擊進入 `src` 資料夾。
+2.  點擊 `App.js` 這個檔案。
+3.  點擊右上角的**鉛筆圖示 (Edit this file)**。
+4.  **刪除編輯器中所有的現有程式碼**。
+5.  **複製左邊視窗中 `FCN 觸價通知應用程式 (React 版)` 的全部程式碼**，然後貼到這個 `App.js` 檔案的編輯器中。
+6.  捲到頁面下方，點擊綠色的 **「Commit changes...」** 按鈕儲存。
+
+---
+
+### 第 3 步：觸發最終部署
+
+當您完成 `App.js` 的儲存後，Vercel 會自動開始最後一次的部署。這次因為 `package.json` 檔案已經是正確的，部署理應會成功。
+
+* 您可以回到 Vercel 的專案頁面，查看部署進度。
+* 等待部署完成（約 1-2 分鐘）。
+
+---
+
+### 第 4 步：如果仍然失敗
+
+如果這次部署仍然失敗，請您在 Vercel 的專案頁面，點擊右上角的 **「Redeploy」** 按鈕，然後選擇 **「Redeploy without using build cache」** (不使用快取重新部署)。這會強制 Vercel 重新下載所有設定，通常能解決這類頑固的快取問題。
+
+**完成後，請將 Vercel 提供給您的暫時網址告訴我**，我們就可以進行最後的網域設
