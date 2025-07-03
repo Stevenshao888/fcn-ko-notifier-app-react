@@ -1,525 +1,591 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  onAuthStateChanged
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
-  onSnapshot, 
-  addDoc, 
-  deleteDoc,
-  updateDoc,
-  query,
-  setLogLevel
-} from 'firebase/firestore';
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FCN 結構型商品追蹤器 (專業版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dayjs/1.11.10/dayjs.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            scroll-behavior: smooth;
+        }
+        .toast {
+            visibility: hidden;
+            min-width: 250px;
+            margin-left: -125px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 8px;
+            padding: 16px;
+            position: fixed;
+            z-index: 100;
+            left: 50%;
+            bottom: 30px;
+            opacity: 0;
+            transition: visibility 0s, opacity 0.5s linear;
+        }
+        .toast.show {
+            visibility: visible;
+            opacity: 1;
+        }
+        /* 個股 KO 狀態 */
+        .stock-ko {
+            background-color: #dcfce7; /* Green-100 */
+            border-left-width: 4px;
+            border-left-color: #22c55e; /* Green-500 */
+            transition: all 0.3s ease-in-out;
+        }
+        .stock-ko .stock-ko-label {
+            color: #166534; /* Green-800 */
+            font-weight: bold;
+        }
+        /* 整體 FCN KO 狀態 */
+        .fcn-ko {
+            border-color: #22c55e;
+            box-shadow: 0 0 15px rgba(34, 197, 94, 0.5);
+        }
+        /* FCN 到期狀態 */
+        .fcn-expired {
+            border-color: #f97316;
+            opacity: 0.8;
+        }
+        /* Modal 樣式 */
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
 
-// --- Icon 組件 (本地化) ---
-const CgSpinner = (props) => <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 512 512" {...props}><path d="M464 256A208 208 0 1 0 48 256a16 16 0 0 1 32 0 176 176 0 1 1 352 0 16 16 0 0 1 32 0z"></path></svg>;
-const FiPlus = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
-const FiTrash2 = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>;
-const FiRefreshCw = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>;
-const FiAlertTriangle = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>;
-const FiBox = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>;
-const FiTarget = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>;
-const FiInfo = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>;
-const FiX = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>;
-const FiCheckCircle = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>;
-const FiEdit = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>;
-const FiBell = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>;
-const FiCalendar = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>;
-const FiClock = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>;
-const FiUser = (props) => <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>;
+    <div id="app-container" class="container mx-auto p-4 md:p-8 max-w-7xl">
 
-// --- Firebase 設定 ---
-const firebaseConfig = process.env.REACT_APP_FIREBASE_CONFIG 
-  ? JSON.parse(process.env.REACT_APP_FIREBASE_CONFIG) 
-  : null;
+        <!-- Header -->
+        <header class="mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800">FCN 結構型商品追蹤器 (專業版)</h1>
+            <p class="text-gray-500 mt-2">自動追蹤股價，輕鬆管理您的 FCN 產品組合。</p>
+            <div class="mt-4 bg-white p-4 rounded-xl shadow-sm border">
+                <label for="apiKey" class="block text-sm font-medium text-gray-700">Financial Modeling Prep API Key</label>
+                <div class="flex items-center space-x-2 mt-1">
+                    <input type="password" id="apiKey" placeholder="請貼上您的免費 API Key" class="block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <button id="saveApiKeyBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition">儲存</button>
+                </div>
+                 <p class="text-xs text-gray-500 mt-1">您的 API Key 將安全地儲存在雲端，僅供您個人使用。</p>
+            </div>
+        </header>
 
-// --- 主應用程式組件 ---
-export default function App() {
-  const [db, setDb] = useState(null);
-  const [user, setUser] = useState(null);
-  const [fcnProducts, setFcnProducts] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [formMode, setFormMode] = useState('hidden');
-  const [editingProduct, setEditingProduct] = useState(null);
-  const [error, setError] = useState(null);
-  const [showInfoModal, setShowInfoModal] = useState(false);
-  const [showNotificationModal, setShowNotificationModal] = useState(false);
-  const [notifications, setNotifications] = useState([]);
-  const [prevProducts, setPrevProducts] = useState([]);
+        <!-- Main Content -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-  const addNotification = useCallback((notification) => {
-      const id = Date.now() + Math.random();
-      setNotifications(current => [...current, { ...notification, id }]);
-      const timeoutId = setTimeout(() => {
-          setNotifications(current => current.filter(n => n.id !== id));
-      }, 5000);
-      return () => clearTimeout(timeoutId);
-  }, []);
+            <!-- Add/Edit FCN Form -->
+            <div id="fcnFormContainer" class="lg:col-span-1 bg-white p-6 rounded-2xl shadow-lg h-fit sticky top-8">
+                <h2 id="formTitle" class="text-2xl font-bold mb-4">新增 FCN 產品</h2>
+                <form id="addFcnForm" class="space-y-4">
+                    <input type="hidden" id="editFcnId">
+                    <div>
+                        <label for="productId" class="block text-sm font-medium text-gray-700">產品編號</label>
+                        <input type="text" id="productId" required class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="issueDate" class="block text-sm font-medium text-gray-700">發行日</label>
+                            <input type="date" id="issueDate" required class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label for="comparisonDate" class="block text-sm font-medium text-gray-700">比價日</label>
+                            <input type="date" id="comparisonDate" required class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                    </div>
+                    <div>
+                        <label for="maturityDate" class="block text-sm font-medium text-gray-700">到期日</label>
+                        <input type="date" id="maturityDate" required class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
 
-  useEffect(() => {
-      const newlyKnockedOutProducts = fcnProducts.filter(product => {
-          const prev = prevProducts.find(p => p.id === product.id);
-          if (!prev) return false;
-          const wasAllKO = prev.stocks.every(s => s.hasKnockedOut);
-          const isAllKO = product.stocks.every(s => s.hasKnockedOut);
-          return isAllKO && !wasAllKO;
-      });
+                    <div id="linkedStocksContainer" class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-900 pt-2">連結個股 (最多4檔)</h3>
+                    </div>
 
-      if (newlyKnockedOutProducts.length > 0) {
-          newlyKnockedOutProducts.forEach(product => {
-              addNotification({ 
-                  title: `產品可出場: ${product.name}`, 
-                  message: '所有連結標的皆已觸價！', 
-                  type: 'success' 
-              });
-          });
-      }
-      setPrevProducts(JSON.parse(JSON.stringify(fcnProducts)));
-  }, [fcnProducts, addNotification]);
+                    <div class="flex items-center space-x-2">
+                        <button type="button" id="addStockBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-4 rounded-lg transition-colors">新增個股</button>
+                    </div>
 
-  useEffect(() => {
-      if (!firebaseConfig || !firebaseConfig.apiKey) {
-          if (process.env.NODE_ENV === 'production') {
-              setError("Firebase 設定未載入。請確認 Vercel 環境變數已正確設定。");
-          }
-          setIsLoading(false);
-          return;
-      }
-      try {
-          const app = initializeApp(firebaseConfig);
-          const authInstance = getAuth(app);
-          const dbInstance = getFirestore(app);
-          setLogLevel('debug');
-          setDb(dbInstance);
+                    <div class="flex flex-col space-y-2">
+                        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">
+                            <span id="submitBtnText">新增追蹤</span>
+                        </button>
+                        <button type="button" id="cancelEditBtn" class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition hidden">取消編輯</button>
+                    </div>
+                </form>
+            </div>
 
-          onAuthStateChanged(authInstance, async (currentUser) => {
-              if (currentUser) {
-                  setUser(currentUser);
-                  setIsLoading(false);
-              } else {
-                  try {
-                      await signInAnonymously(authInstance);
-                  } catch (authError) { 
-                      console.error("登入失敗:", authError); 
-                      setError("無法連接到認證服務。"); 
-                      setIsLoading(false); 
-                  }
-              }
-          });
-      } catch (e) { 
-          console.error("Firebase 初始化失敗:", e); 
-          setError("應用程式設定錯誤。"); 
-          setIsLoading(false); 
-      }
-  }, []);
+            <!-- FCN List -->
+            <div class="lg:col-span-2">
+                 <div class="flex flex-wrap gap-4 justify-between items-center mb-4">
+                    <h2 class="text-2xl font-bold">追蹤列表</h2>
+                    <div class="flex items-center gap-2">
+                        <button id="syncPricesBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
+                            <span id="syncBtnText">同步所有股價</span>
+                            <span id="syncSpinner" class="hidden">同步中...</span>
+                        </button>
+                        <button id="checkMaturityBtn" class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">檢查到期</button>
+                    </div>
+                </div>
+                <div id="fcnList" class="space-y-6">
+                     <p id="loadingState" class="text-center text-gray-500 py-10">正在從雲端載入資料...</p>
+                </div>
+            </div>
+        </div>
+    </div>
 
-  useEffect(() => {
-      if (user && db) {
-          const userId = user.uid;
-          const collectionPath = `users/${userId}/fcn_products`;
-          const q = query(collection(db, collectionPath));
+    <!-- Modals -->
+    <div id="deleteConfirmModal" class="modal-backdrop hidden">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
+            <h3 class="text-lg font-bold">確認刪除</h3>
+            <p class="text-gray-600 mt-2">您確定要刪除這個 FCN 產品嗎？此操作無法復原。</p>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button id="cancelDeleteBtn" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">取消</button>
+                <button id="confirmDeleteBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700">確認刪除</button>
+            </div>
+        </div>
+    </div>
 
-          const unsubscribe = onSnapshot(q, (querySnapshot) => {
-              const productsData = [];
-              querySnapshot.forEach((doc) => {
-                  productsData.push({ id: doc.id, ...doc.data() });
-              });
-              setFcnProducts(productsData);
-          }, (err) => { 
-              console.error("Firestore 監聽失敗:", err); 
-              setError("無法讀取您的 FCN 產品清單。"); 
-          });
-          return () => unsubscribe();
-      }
-  }, [user, db]);
-  
-  const closeForm = () => { 
-      setFormMode('hidden'); 
-      setEditingProduct(null); 
-  };
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
 
-  const handleAddFCN = async (product) => {
-      if (!db || !user) {
-          setError("資料庫連接失敗，請重新整理頁面。");
-          return;
-      }
-      
-      const initialStocks = product.stocks.map(stock => ({ 
-          ...stock, 
-          lastClosePrice: parseFloat((Math.random() * (stock.koPrice * 0.8) + (stock.koPrice * 0.1)).toFixed(2)), 
-          hasKnockedOut: false 
-      }));
-      
-      try {
-          const userId = user.uid;
-          const collectionPath = `users/${userId}/fcn_products`;
-          await addDoc(collection(db, collectionPath), { 
-              ...product, 
-              stocks: initialStocks, 
-              createdAt: new Date(), 
-              comparisonNotificationSent: false, 
-              maturityNotificationSent: false 
-          });
-          
-          addNotification({ 
-              title: '新增成功', 
-              message: `FCN 產品 "${product.name}" 已成功新增！`, 
-              type: 'success' 
-          });
-          closeForm();
-      } catch (e) { 
-          console.error("新增 FCN 失敗:", e); 
-          setError(`無法新增 FCN 產品：${e.message}`);
-          addNotification({ 
-              title: '新增失敗', 
-              message: '請稍後再試或聯繫技術支援。', 
-              type: 'error' 
-          });
-      }
-  };
-  
-  const handleUpdateFCN = async (product) => {
-      if (!db || !user || !editingProduct) return;
-      try {
-          const userId = user.uid;
-          const docPath = `users/${userId}/fcn_products/${editingProduct.id}`;
-          const updatedStocks = product.stocks.map(newStock => {
-              const oldStock = editingProduct.stocks.find(s => s.ticker === newStock.ticker);
-              return { 
-                  ...newStock, 
-                  hasKnockedOut: oldStock ? oldStock.hasKnockedOut : false, 
-                  lastClosePrice: oldStock ? oldStock.lastClosePrice : 0 
-              };
-          });
-          
-          const finalProductData = { ...product, stocks: updatedStocks };
-          if (product.comparisonDate !== editingProduct.comparisonDate) { 
-              finalProductData.comparisonNotificationSent = false; 
-          }
-          if (product.expiryDate !== editingProduct.expiryDate) { 
-              finalProductData.maturityNotificationSent = false; 
-          }
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, addDoc, onSnapshot, query, updateDoc, deleteDoc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-          await updateDoc(doc(db, docPath), finalProductData);
-          addNotification({ 
-              title: '更新成功', 
-              message: `FCN 產品 "${product.name}" 已成功更新！`, 
-              type: 'success' 
-          });
-          closeForm();
-      } catch (e) { 
-          console.error("更新 FCN 失敗:", e); 
-          setError(`無法更新 FCN 產品：${e.message}`);
-          addNotification({ 
-              title: '更新失敗', 
-              message: '請稍後再試或聯繫技術支援。', 
-              type: 'error' 
-          });
-      }
-  };
+        // --- Firebase 設定 ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "YOUR_API_KEY", authDomain: "YOUR_AUTH_DOMAIN", projectId: "YOUR_PROJECT_ID" };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'fcn-tracker-default';
 
-  const handleDeleteFCN = async (id) => {
-      if (!db || !user) return;
-      try {
-          const userId = user.uid;
-          const docPath = `users/${userId}/fcn_products/${id}`;
-          await deleteDoc(doc(db, docPath));
-          addNotification({ 
-              title: '刪除成功', 
-              message: '已成功刪除 FCN 產品。', 
-              type: 'success' 
-          });
-      } catch (e) { 
-          console.error("刪除 FCN 失敗:", e); 
-          setError(`無法刪除 FCN 產品：${e.message}`);
-          addNotification({ 
-              title: '刪除失敗', 
-              message: '請稍後再試或聯繫技術支援。', 
-              type: 'error' 
-          });
-      }
-  };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
 
-  const handleRefreshPrices = async () => {
-      if (!db || !user) return;
-      
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayTime = today.getTime();
+        let currentUserId = null;
+        let fcnCollectionRef = null;
+        let unsubscribeFcns = null;
+        let fcnToDeleteId = null;
+        let allFcnsData = []; // Store all FCN data for API calls
 
-      const updatePromises = [];
-      let koSimulated = false;
+        // --- UI 元素 ---
+        const apiKeyInput = document.getElementById('apiKey');
+        const saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
+        const addFcnForm = document.getElementById('addFcnForm');
+        const linkedStocksContainer = document.getElementById('linkedStocksContainer');
+        const addStockBtn = document.getElementById('addStockBtn');
+        const fcnList = document.getElementById('fcnList');
+        const loadingState = document.getElementById('loadingState');
+        const submitBtnText = document.getElementById('submitBtnText');
+        const checkMaturityBtn = document.getElementById('checkMaturityBtn');
+        const syncPricesBtn = document.getElementById('syncPricesBtn');
+        const syncBtnText = document.getElementById('syncBtnText');
+        const syncSpinner = document.getElementById('syncSpinner');
+        const deleteConfirmModal = document.getElementById('deleteConfirmModal');
+        const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+        const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+        const formTitle = document.getElementById('formTitle');
+        const editFcnIdInput = document.getElementById('editFcnId');
+        const cancelEditBtn = document.getElementById('cancelEditBtn');
 
-      for (const product of fcnProducts) {
-          const productUpdates = {};
-          const isAllKO = product.stocks.every(s => s.hasKnockedOut);
-          
-          if (product.comparisonDate && !product.comparisonNotificationSent) {
-              const comparisonDate = new Date(product.comparisonDate);
-              comparisonDate.setHours(0, 0, 0, 0);
-              if (comparisonDate.getTime() === todayTime) {
-                  addNotification({ 
-                      title: '比價開始', 
-                      message: `產品 "${product.name}" 已到達比價日。`, 
-                      type: 'info' 
-                  });
-                  productUpdates.comparisonNotificationSent = true;
-              }
-          }
+        // --- 核心功能 ---
 
-          if (product.expiryDate && !product.maturityNotificationSent && !isAllKO) {
-              const expiryDate = new Date(product.expiryDate);
-              expiryDate.setHours(0, 0, 0, 0);
-              if (expiryDate.getTime() === todayTime) {
-                  addNotification({ 
-                      title: '產品到期提醒', 
-                      message: `產品 "${product.name}" 已到期但未完全出場。`, 
-                      type: 'error' 
-                  });
-                  productUpdates.maturityNotificationSent = true;
-              }
-          }
-          
-          if (Object.keys(productUpdates).length > 0) {
-              const docPath = `users/${user.uid}/fcn_products/${product.id}`;
-              updatePromises.push(updateDoc(doc(db, docPath), productUpdates));
-          }
-      }
+        function showToast(message, duration = 3000) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), duration);
+        }
 
-      const productToUpdateForKO = fcnProducts.find(p => {
-          if (!p.comparisonDate) return false;
-          const comparisonDate = new Date(p.comparisonDate);
-          comparisonDate.setHours(0, 0, 0, 0);
-          const isReadyForCheck = comparisonDate <= today;
-          const hasPendingKO = p.stocks.some(s => !s.hasKnockedOut);
-          return isReadyForCheck && hasPendingKO;
-      });
+        function addStockInput(stock = { symbol: '', koPrice: '' }) {
+            const stockCount = linkedStocksContainer.querySelectorAll('.stock-group').length;
+            if (stockCount >= 4) {
+                showToast("最多只能新增4檔個股");
+                return;
+            }
+            const stockDiv = document.createElement('div');
+            stockDiv.className = 'stock-group p-3 border border-gray-200 rounded-lg space-y-2 relative';
+            stockDiv.innerHTML = `
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-600">股票代號</label>
+                        <input type="text" placeholder="AAPL, 7203.T" value="${stock.symbol}" required class="stock-symbol mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-600">KO 價格</label>
+                        <input type="number" step="any" placeholder="例如: 190.5" value="${stock.koPrice}" required class="stock-ko-price mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm">
+                    </div>
+                </div>
+                <button type="button" class="remove-stock-btn absolute top-1 right-1 text-gray-400 hover:text-red-500 text-xs">&times;</button>
+            `;
+            linkedStocksContainer.appendChild(stockDiv);
+        }
 
-      if (productToUpdateForKO) {
-          const updatedStocks = JSON.parse(JSON.stringify(productToUpdateForKO.stocks));
-          const stockIndexToKO = updatedStocks.findIndex(s => !s.hasKnockedOut);
-          if (stockIndexToKO !== -1) {
-              const stock = updatedStocks[stockIndexToKO];
-              stock.lastClosePrice = parseFloat((stock.koPrice * 1.05).toFixed(2));
-              stock.hasKnockedOut = true;
-              addNotification({ 
-                  title: '模擬觸價成功', 
-                  message: `產品 ${productToUpdateForKO.name} 中的 ${stock.ticker} 已觸價！`, 
-                  type: 'success' 
-              });
-              koSimulated = true;
-              
-              const docPath = `users/${user.uid}/fcn_products/${productToUpdateForKO.id}`;
-              updatePromises.push(updateDoc(doc(db, docPath), { stocks: updatedStocks }));
-          }
-      } 
-      
-      if (updatePromises.length === 0 && !koSimulated) {
-           addNotification({ 
-              title: '提示', 
-              message: '今日無任何事件發生。', 
-              type: 'info' 
-          });
-      }
+        linkedStocksContainer.addEventListener('click', e => {
+            if (e.target && e.target.classList.contains('remove-stock-btn')) {
+                e.target.closest('.stock-group').remove();
+            }
+        });
+        
+        // --- 渲染與顯示 ---
+        function renderFcnCard(fcn) {
+            let cardClass = '', statusText = fcn.status, statusColor = 'text-blue-600';
+            if (fcn.status === '已提前出場') {
+                cardClass = 'fcn-ko';
+                statusText = `已提前出場 (${fcn.koDate || ''})`;
+                statusColor = 'text-green-600';
+            } else if (fcn.status === '已到期') {
+                cardClass = 'fcn-expired';
+                statusText = `已到期 (${fcn.maturityDate})`;
+                statusColor = 'text-orange-600';
+            }
 
-      if (updatePromises.length > 0) {
-          try {
-              await Promise.all(updatePromises);
-          } catch (e) { 
-              console.error("更新失敗:", e); 
-              setError("執行每日檢查時發生錯誤。"); 
-          }
-      }
-  };
-  
-  const handleEditClick = (product) => { 
-      setEditingProduct(product); 
-      setFormMode('edit'); 
-  };
+            const stocksHtml = fcn.stocks.map(stock => {
+                const stockStatusClass = stock.hasHitKO ? 'stock-ko' : '';
+                const hitDateText = stock.hasHitKO ? ` (${dayjs(stock.hitKODate).format('YYYY/MM/DD')} 觸及)` : '';
+                return `
+                    <div class="p-3 rounded-lg ${stockStatusClass} border border-gray-200">
+                        <div class="flex justify-between items-center">
+                            <p class="font-semibold text-lg">${stock.symbol}</p>
+                            <p class="text-sm font-mono stock-ko-label">${stock.hasHitKO ? '已觸及KO' : '未觸及'}</p>
+                        </div>
+                        <p class="text-sm text-gray-600">KO 價格: <span class="font-medium">${stock.koPrice}</span>${hitDateText}</p>
+                    </div>
+                `;
+            }).join('');
 
-  if (isLoading) return <LoadingScreen />;
-  if (error) return <ErrorScreen message={error} />;
+            return `
+                <div id="${fcn.id}" class="fcn-card bg-white p-5 rounded-2xl shadow-md border-2 border-transparent transition-all duration-300 ${cardClass}">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-800">${fcn.productId}</h3>
+                            <p class="text-sm font-bold ${statusColor}">${statusText}</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button class="edit-btn p-2 text-gray-400 hover:text-blue-600" data-id="${fcn.id}" title="編輯"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg></button>
+                            <button class="delete-btn p-2 text-gray-400 hover:text-red-600" data-id="${fcn.id}" title="刪除"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg></button>
+                        </div>
+                    </div>
+                    <div class="text-right text-xs text-gray-500 mb-4">
+                        <p>比價日: ${fcn.comparisonDate} | 到期日: ${fcn.maturityDate}</p>
+                    </div>
+                    <div class="space-y-3">${stocksHtml}</div>
+                </div>
+            `;
+        }
 
-  return (
-      <div className="bg-gray-900 text-white min-h-screen font-sans">
-          <NotificationArea notifications={notifications} />
-          <div className="container mx-auto p-4 md:p-8">
-              <Header 
-                  onRefresh={handleRefreshPrices} 
-                  onInfo={() => setShowInfoModal(true)} 
-                  onNotify={() => setShowNotificationModal(true)} 
-              />
-              {showInfoModal && (
-                  <InfoModal 
-                      onClose={() => setShowInfoModal(false)} 
-                      userId={user?.uid} 
-                  />
-              )}
-              {showNotificationModal && (
-                  <NotificationSettingsModal 
-                      onClose={() => setShowNotificationModal(false)} 
-                      addNotification={addNotification} 
-                  />
-              )}
-              <main>
-                  {formMode !== 'hidden' ? (
-                      <FCNForm 
-                          mode={formMode} 
-                          initialData={editingProduct} 
-                          onSubmit={formMode === 'add' ? handleAddFCN : handleUpdateFCN} 
-                          onCancel={closeForm} 
-                      />
-                  ) : (
-                      <div className="flex justify-end mb-4">
-                          <button 
-                              onClick={() => setFormMode('add')} 
-                              className="flex items-center bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105"
-                          >
-                              <FiPlus className="mr-2" /> 新增 FCN 產品
-                          </button>
-                      </div>
-                  )}
-                  <Dashboard 
-                      products={fcnProducts} 
-                      onEdit={handleEditClick} 
-                      onDelete={handleDeleteFCN} 
-                  />
-              </main>
-          </div>
-      </div>
-  );
-}
+        function resetForm() {
+            addFcnForm.reset();
+            linkedStocksContainer.innerHTML = '';
+            addStockInput();
+            editFcnIdInput.value = '';
+            formTitle.textContent = '新增 FCN 產品';
+            submitBtnText.textContent = '新增追蹤';
+            cancelEditBtn.classList.add('hidden');
+        }
 
-// --- 子組件 ---
+        // --- Firestore & Data Logic ---
+        async function saveApiKey() {
+            if (!currentUserId || !apiKeyInput.value) return;
+            const apiKeyRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'settings', 'apiKey');
+            try {
+                await setDoc(apiKeyRef, { key: apiKeyInput.value });
+                showToast("API Key 已成功儲存！");
+            } catch (error) {
+                console.error("Error saving API key:", error);
+                showToast("API Key 儲存失敗。");
+            }
+        }
 
-const LoadingScreen = () => (
-  <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
-      <div className="text-center">
-          <CgSpinner className="animate-spin text-5xl text-indigo-400 mx-auto" />
-          <p className="mt-4 text-lg">正在載入應用程式...</p>
-      </div>
-  </div>
-);
+        async function loadApiKey() {
+            if (!currentUserId) return;
+            const apiKeyRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'settings', 'apiKey');
+            try {
+                const docSnap = await getDoc(apiKeyRef);
+                if (docSnap.exists()) {
+                    apiKeyInput.value = docSnap.data().key;
+                }
+            } catch (error) {
+                console.error("Error loading API key:", error);
+            }
+        }
 
-const ErrorScreen = ({ message }) => (
-  <div className="flex items-center justify-center min-h-screen bg-gray-900 text-red-400">
-      <div className="text-center p-8 bg-gray-800 rounded-lg shadow-2xl">
-          <FiAlertTriangle className="text-5xl text-red-500 mx-auto" />
-          <h2 className="mt-4 text-2xl font-bold">發生錯誤</h2>
-          <p className="mt-2">{message}</p>
-      </div>
-  </div>
-);
+        function listenToFcns() {
+            if (unsubscribeFcns) unsubscribeFcns();
+            fcnCollectionRef = collection(db, 'artifacts', appId, 'users', currentUserId, 'fcns');
+            const q = query(fcnCollectionRef);
 
-const Header = ({ onRefresh, onInfo, onNotify }) => (
-  <header className="flex justify-between items-center mb-6 pb-4 border-b border-gray-700">
-      <div>
-          <h1 className="text-3xl md:text-4xl font-bold text-white">FCN 觸價通知</h1>
-          <p className="text-gray-400">以產品組合為單位，追蹤記憶式出場條件</p>
-      </div>
-      <div className="flex items-center space-x-2">
-          <button 
-              onClick={onNotify} 
-              className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition-colors relative" 
-              title="通知設定"
-          >
-              <FiBell className="text-xl" />
-          </button>
-          <button 
-              onClick={onInfo} 
-              className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition-colors" 
-              title="應用程式資訊"
-          >
-              <FiInfo className="text-xl" />
-          </button>
-          <button 
-              onClick={onRefresh} 
-              className="flex items-center bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-colors" 
-              title="模擬每日檢查"
-          >
-              <FiRefreshCw className="mr-2" />
-              <span className="hidden md:inline">模擬每日檢查</span>
-          </button>
-      </div>
-  </header>
-);
+            unsubscribeFcns = onSnapshot(q, (snapshot) => {
+                loadingState.style.display = 'none';
+                allFcnsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                checkAllMaturities(allFcnsData, false);
 
-const InfoModal = ({ onClose, userId }) => (
-  <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-lg shadow-2xl max-w-lg w-full p-6 relative animate-fade-in">
-          <button 
-              onClick={onClose} 
-              className="absolute top-4 right-4 text-gray-400 hover:text-white"
-          >
-              <FiX size={24} />
-          </button>
-          <h2 className="text-2xl font-bold mb-4 text-indigo-400">應用程式資訊</h2>
-          <div className="space-y-3 text-gray-300">
-              <p><strong>新功能:</strong></p>
-              <ul className="list-disc list-inside space-y-2 pl-2">
-                  <li>連結標的已擴充至四檔。</li>
-                  <li>新增客戶姓名欄位。</li>
-                  <li>資訊視窗已加入明確的「關閉」按鈕。</li>
-              </ul>
-              <p className="pt-2">您的專屬使用者 ID 為:</p>
-              <p className="font-mono bg-gray-900 p-2 rounded text-indigo-300 text-xs break-all">
-                  {userId}
-              </p>
-          </div>
-          <div className="mt-6 text-right">
-              <button 
-                  onClick={onClose} 
-                  className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg"
-              >
-                  關閉
-              </button>
-          </div>
-      </div>
-  </div>
-);
+                if (allFcnsData.length === 0) {
+                    fcnList.innerHTML = '<p class="text-center text-gray-500 py-10">尚未新增任何 FCN 產品。</p>';
+                    return;
+                }
+                fcnList.innerHTML = allFcnsData
+                    .sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate))
+                    .map(renderFcnCard).join('');
+            }, (error) => {
+                console.error("Error listening to FCNs:", error);
+                fcnList.innerHTML = '<p class="text-center text-red-500 py-10">讀取資料時發生錯誤。</p>';
+            });
+        }
 
-const NotificationSettingsModal = ({ onClose, addNotification }) => {
-  const [permission, setPermission] = useState('default');
-  const [email, setEmail] = useState('');
-  
-  const handleRequestPermission = () => {
-      setPermission('granting');
-      addNotification({ 
-          title: '模擬授權', 
-          message: '瀏覽器正在向您請求傳送通知的權限...' 
-      });
-      setTimeout(() => { 
-          setPermission('granted'); 
-          addNotification({ 
-              title: '授權成功', 
-              message: '您已允許瀏覽器推播通知！', 
-              type: 'success' 
-          }); 
-      }, 1500);
-  };
-  
-  const handleSaveEmail = () => {
-      if(email && email.includes('@')) { 
-          addNotification({ 
-              title: '設定成功', 
-              message: `電子郵件通知將發送到 ${email}`, 
-              type: 'success' 
-          }); 
-          onClose(); 
-      } else { 
-          addNotification({ 
-              title: '格式錯誤', 
-              message: '請輸入有效的電子郵件地址', 
-              type: 'error' 
-          }); 
-      }
-  };
+        addFcnForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUserId) { showToast("錯誤：無法取得用戶資訊"); return; }
 
-  return (
-      <div className="fixe
+            const stockGroups = linkedStocksContainer.querySelectorAll('.stock-group');
+            if (stockGroups.length === 0) { showToast("請至少新增一檔連結個股"); return; }
+            
+            const stocks = Array.from(stockGroups).map(group => ({
+                symbol: group.querySelector('.stock-symbol').value.trim().toUpperCase(),
+                koPrice: parseFloat(group.querySelector('.stock-ko-price').value),
+                hasHitKO: false,
+                hitKODate: null
+            }));
+
+            const fcnData = {
+                productId: document.getElementById('productId').value,
+                issueDate: document.getElementById('issueDate').value,
+                comparisonDate: document.getElementById('comparisonDate').value,
+                maturityDate: document.getElementById('maturityDate').value,
+                stocks: stocks,
+                userId: currentUserId,
+            };
+
+            const editId = editFcnIdInput.value;
+            try {
+                if (editId) { // 更新模式
+                    // 在更新時，保留現有的 KO 狀態
+                    const originalFcn = allFcnsData.find(fcn => fcn.id === editId);
+                    if (originalFcn) {
+                        fcnData.stocks.forEach(newStock => {
+                            const originalStock = originalFcn.stocks.find(os => os.symbol === newStock.symbol);
+                            if (originalStock && originalStock.hasHitKO) {
+                                newStock.hasHitKO = originalStock.hasHitKO;
+                                newStock.hitKODate = originalStock.hitKODate;
+                            }
+                        });
+                    }
+                    const fcnRef = doc(db, fcnCollectionRef.path, editId);
+                    await updateDoc(fcnRef, fcnData);
+                    showToast("FCN 更新成功！");
+                } else { // 新增模式
+                    fcnData.status = '追蹤中';
+                    fcnData.koDate = null;
+                    await addDoc(fcnCollectionRef, fcnData);
+                    showToast("FCN 新增成功！");
+                }
+                resetForm();
+            } catch (error) {
+                console.error("Error saving FCN:", error);
+                showToast("儲存失敗，請稍後再試。");
+            }
+        });
+
+        // --- 事件監聽 ---
+        fcnList.addEventListener('click', async (e) => {
+            const editBtn = e.target.closest('.edit-btn');
+            const deleteBtn = e.target.closest('.delete-btn');
+
+            if (editBtn) {
+                const fcnId = editBtn.dataset.id;
+                const fcnToEdit = allFcnsData.find(fcn => fcn.id === fcnId);
+                if (!fcnToEdit) return;
+
+                formTitle.textContent = '編輯 FCN 產品';
+                submitBtnText.textContent = '更新產品';
+                editFcnIdInput.value = fcnId;
+                document.getElementById('productId').value = fcnToEdit.productId;
+                document.getElementById('issueDate').value = fcnToEdit.issueDate;
+                document.getElementById('comparisonDate').value = fcnToEdit.comparisonDate;
+                document.getElementById('maturityDate').value = fcnToEdit.maturityDate;
+                
+                linkedStocksContainer.innerHTML = '';
+                fcnToEdit.stocks.forEach(stock => addStockInput(stock));
+                
+                cancelEditBtn.classList.remove('hidden');
+                document.getElementById('fcnFormContainer').scrollIntoView();
+            }
+
+            if (deleteBtn) {
+                fcnToDeleteId = deleteBtn.dataset.id;
+                deleteConfirmModal.classList.remove('hidden');
+            }
+        });
+
+        cancelEditBtn.addEventListener('click', resetForm);
+        cancelDeleteBtn.addEventListener('click', () => deleteConfirmModal.classList.add('hidden'));
+        confirmDeleteBtn.addEventListener('click', async () => {
+            if (!fcnToDeleteId) return;
+            try {
+                await deleteDoc(doc(db, fcnCollectionRef.path, fcnToDeleteId));
+                showToast("產品已刪除");
+                fcnToDeleteId = null;
+                deleteConfirmModal.classList.add('hidden');
+            } catch (error) {
+                console.error("Error deleting FCN:", error);
+                showToast("刪除失敗");
+            }
+        });
+
+        // --- 自動化與檢查 ---
+        async function syncPrices() {
+            const apiKey = apiKeyInput.value;
+            if (!apiKey) {
+                showToast("請先輸入並儲存您的 API Key。");
+                return;
+            }
+            syncPricesBtn.disabled = true;
+            syncBtnText.classList.add('hidden');
+            syncSpinner.classList.remove('hidden');
+
+            const today = dayjs().startOf('day');
+            const stocksToFetch = new Set();
+            const fcnsToUpdate = allFcnsData.filter(fcn => {
+                const comparisonDate = dayjs(fcn.comparisonDate);
+                return fcn.status === '追蹤中' && (today.isAfter(comparisonDate) || today.isSame(comparisonDate));
+            });
+
+            if (fcnsToUpdate.length === 0) {
+                showToast("沒有需要同步的追蹤中產品。");
+                syncPricesBtn.disabled = false;
+                syncBtnText.classList.remove('hidden');
+                syncSpinner.classList.add('hidden');
+                return;
+            }
+
+            fcnsToUpdate.forEach(fcn => {
+                fcn.stocks.forEach(stock => {
+                    if (!stock.hasHitKO) stocksToFetch.add(stock.symbol);
+                });
+            });
+            
+            if (stocksToFetch.size === 0) {
+                showToast("所有追蹤中個股均已達KO價。");
+                syncPricesBtn.disabled = false;
+                syncBtnText.classList.remove('hidden');
+                syncSpinner.classList.add('hidden');
+                return;
+            }
+
+            try {
+                const url = `https://financialmodelingprep.com/api/v3/quote/${[...stocksToFetch].join(',')}?apikey=${apiKey}`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`API 請求失敗: ${response.statusText}`);
+                const priceData = await response.json();
+                
+                let updatedCount = 0;
+                const priceMap = new Map(priceData.map(d => [d.symbol, d.price]));
+
+                for (const fcn of fcnsToUpdate) {
+                    let hasUpdates = false;
+                    for (let i = 0; i < fcn.stocks.length; i++) {
+                        const stock = fcn.stocks[i];
+                        if (!stock.hasHitKO && priceMap.has(stock.symbol)) {
+                            const currentPrice = priceMap.get(stock.symbol);
+                            if (currentPrice >= stock.koPrice) {
+                                const updatePath = `stocks.${i}.hasHitKO`;
+                                const updateDatePath = `stocks.${i}.hitKODate`;
+                                const fcnRef = doc(db, fcnCollectionRef.path, fcn.id);
+                                await updateDoc(fcnRef, {
+                                    [updatePath]: true,
+                                    [updateDatePath]: dayjs().format('YYYY-MM-DD')
+                                });
+                                hasUpdates = true;
+                                updatedCount++;
+                            }
+                        }
+                    }
+                    if (hasUpdates) {
+                        // 檢查是否所有股票都已 KO
+                        const updatedFcnDoc = await getDoc(doc(db, fcnCollectionRef.path, fcn.id));
+                        const updatedFcnData = updatedFcnDoc.data();
+                        const allHitKO = updatedFcnData.stocks.every(s => s.hasHitKO);
+                        if (allHitKO) {
+                            await updateDoc(doc(db, fcnCollectionRef.path, fcn.id), {
+                                status: '已提前出場',
+                                koDate: dayjs().format('YYYY-MM-DD')
+                            });
+                        }
+                    }
+                }
+                showToast(`同步完成！${updatedCount} 檔個股狀態已更新。`);
+            } catch (error) {
+                console.error("Error syncing prices:", error);
+                showToast("股價同步失敗，請檢查 API Key 或股票代號。");
+            } finally {
+                syncPricesBtn.disabled = false;
+                syncBtnText.classList.remove('hidden');
+                syncSpinner.classList.add('hidden');
+            }
+        }
+        
+        async function checkAllMaturities(fcns, showMsg = true) {
+            const today = dayjs().startOf('day');
+            let updatedCount = 0;
+            for (const fcn of fcns) {
+                if (fcn.status === '追蹤中' && today.isAfter(dayjs(fcn.maturityDate))) {
+                    const fcnRef = doc(db, fcnCollectionRef.path, fcn.id);
+                    await updateDoc(fcnRef, { status: '已到期' });
+                    updatedCount++;
+                }
+            }
+            if (showMsg && updatedCount > 0) {
+                showToast(`已將 ${updatedCount} 個產品標示為已到期。`);
+            }
+        }
+
+        // --- 初始化 ---
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUserId = user.uid;
+                listenToFcns();
+                loadApiKey();
+            } else {
+                console.log("User is not signed in.");
+            }
+        });
+        
+        async function initializeAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Authentication failed:", error);
+            }
+        }
+
+        window.onload = () => {
+            addStockInput();
+            addStockBtn.addEventListener('click', () => addStockInput());
+            saveApiKeyBtn.addEventListener('click', saveApiKey);
+            syncPricesBtn.addEventListener('click', syncPrices);
+            checkMaturityBtn.addEventListener('click', () => checkAllMaturities(allFcnsData, true));
+            initializeAuth();
+        };
+    </script>
+</body>
+</html>
